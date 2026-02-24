@@ -228,7 +228,9 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-top: 10px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
     }
 
     .quick-add button {
@@ -513,8 +515,17 @@
   <div class="app">
     <!-- Sidebar -->
     <div class="sidebar">
-      <!-- API Key -->
-      <div class="card">
+      <!-- Shopping List -->
+      <div class="card shopping-list-card">
+        <h2>Shopping List</h2>
+        <div class="lined-paper" id="linedPaper"></div>
+        <div class="suggestions-list" id="suggestionsList"></div>
+        <ul class="shopping-list" id="shoppingList"></ul>
+        <div class="quick-add" id="quickAdd"></div>
+      </div>
+
+      <!-- API Key (hidden) -->
+      <div class="card" style="display:none;">
         <h2>Esri API Key</h2>
         <input type="password" class="api-key-input" id="apiKeyInput" placeholder="Paste your ArcGIS API key" value="AAPTxy8BH1VEsoebNVZXo8HurPFlEj33bQWHhAhJDlfe7YinzP_b_-Kyd4takDZXk8jLiwJRH6QyVcrNZw2evjBEgXqVoIpTGlLQNrcb2QjM3OhItGer4OKJ6ZOcNfV_ltjMhybjeqrhW6546pFMLkBDiWFWVex6YenT1T5AdF2F2Ek8sG0r3V3R2eRw7BwyH1228TX-ru6RkrYF9D3uduRCGb-QY7YmIcm7zPvlepwBjGs.AT1_w4T35sfT" />
         <div class="api-key-help">
@@ -522,14 +533,6 @@
           Enables geocoding and drive-time areas.
         </div>
         <div class="api-key-status valid" id="apiKeyStatus">Key set &mdash; geocoding and drive-time areas enabled</div>
-      </div>
-
-      <!-- Shopping List -->
-      <div class="card shopping-list-card">
-        <h2>Shopping List</h2>
-        <div class="lined-paper" id="linedPaper"></div>
-        <div class="suggestions-list" id="suggestionsList"></div>
-        <ul class="shopping-list" id="shoppingList"></ul>
       </div>
 
       <!-- Location -->
@@ -926,7 +929,11 @@
     });
 
     function renderQuickAdd() {
-      // No longer needed — users type directly on the paper
+      const popular = ["milk", "eggs", "bread", "bananas", "chicken breast", "rice", "coffee"];
+      const quickAddEl = document.getElementById("quickAdd");
+      quickAddEl.innerHTML = popular.map(item =>
+        `<button onclick="addItem('${item}')">${item}</button>`
+      ).join("");
       renderLinedPaper();
     }
 
