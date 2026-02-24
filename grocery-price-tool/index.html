@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grocery Price Compare</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/esri-leaflet-geocoder@3.1.4/dist/esri-leaflet-geocoder.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -272,6 +273,42 @@
       text-align: right;
     }
 
+    /* API key */
+    .api-key-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    .api-key-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+
+    .api-key-help {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .api-key-help a {
+      color: var(--accent);
+    }
+
+    .api-key-status {
+      font-size: 0.75rem;
+      margin-top: 4px;
+      font-weight: 500;
+    }
+
+    .api-key-status.valid { color: var(--green); }
+    .api-key-status.missing { color: var(--orange); }
+
     /* --- Main: Results --- */
     .main {
       display: flex;
@@ -414,17 +451,47 @@
     .location-status.error {
       color: var(--red);
     }
+
+    /* Drive-time polygon legend */
+    .drive-time-legend {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .drive-time-legend .swatch {
+      width: 14px;
+      height: 14px;
+      background: rgba(37, 99, 235, 0.12);
+      border: 2px solid rgba(37, 99, 235, 0.5);
+      border-radius: 3px;
+      display: inline-block;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>Grocery Price Compare</h1>
-    <p>Find the cheapest groceries near you</p>
+    <p>Find the cheapest groceries near you &mdash; powered by Esri</p>
   </header>
 
   <div class="app">
     <!-- Sidebar -->
     <div class="sidebar">
+      <!-- API Key -->
+      <div class="card">
+        <h2>Esri API Key</h2>
+        <input type="password" class="api-key-input" id="apiKeyInput" placeholder="Paste your ArcGIS API key" />
+        <div class="api-key-help">
+          Get a free key at <a href="https://developers.arcgis.com/sign-up/" target="_blank" rel="noopener">developers.arcgis.com</a>.<br>
+          Enables geocoding and drive-time areas.
+        </div>
+        <div class="api-key-status missing" id="apiKeyStatus">No key &mdash; using basic mode (haversine estimates)</div>
+      </div>
+
       <!-- Shopping List -->
       <div class="card">
         <h2>Shopping List</h2>
@@ -461,6 +528,9 @@
           <input type="range" id="driveTime" min="5" max="30" step="5" value="15" />
           <span class="slider-value" id="driveTimeValue">15 min</span>
         </div>
+        <div class="drive-time-legend" id="driveTimeLegend" style="display:none;">
+          <span class="swatch"></span> Reachable drive-time area
+        </div>
       </div>
 
       <!-- Compare Button -->
@@ -482,14 +552,22 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
+  <script src="https://unpkg.com/esri-leaflet-geocoder@3.1.4/dist/esri-leaflet-geocoder.js"></script>
   <script>
     // =========================================================
     // State
     // =========================================================
     let shoppingList = [];
     let storeData = null;
-    let userLocation = { lat: 40.744, lng: -74.032, label: "Hoboken, NJ" }; // default
+    let userLocation = { lat: 40.744, lng: -74.032, label: "Hoboken, NJ" };
     let map, userMarker, storeMarkers = [];
+    let driveTimePolygon = null;
+    let searchControl = null;
+
+    function getApiKey() {
+      return document.getElementById("apiKeyInput").value.trim();
+    }
 
     // =========================================================
     // Load mock data
@@ -501,13 +579,13 @@
     }
 
     // =========================================================
-    // Map
+    // Map — Esri basemap via esri-leaflet
     // =========================================================
     function initMap() {
       map = L.map("map").setView([userLocation.lat, userLocation.lng], 13);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
-      }).addTo(map);
+
+      // Esri basemap tile layer (World Street Map)
+      L.esri.basemapLayer("Streets").addTo(map);
 
       userMarker = L.marker([userLocation.lat, userLocation.lng], {
         icon: L.divIcon({
@@ -517,11 +595,42 @@
           iconAnchor: [7, 7]
         })
       }).addTo(map).bindPopup("You");
+
+      // Esri geocoder search control on the map
+      searchControl = L.esri.Geocoding.geosearch({
+        position: "topright",
+        placeholder: "Search address...",
+        useMapBounds: false,
+        providers: [
+          L.esri.Geocoding.arcgisOnlineProvider({
+            apikey: getApiKey() || undefined
+          })
+        ]
+      }).addTo(map);
+
+      // When user selects a search result from the map control, update location
+      searchControl.on("results", function (data) {
+        if (data.results && data.results.length > 0) {
+          const r = data.results[0];
+          userLocation = { lat: r.latlng.lat, lng: r.latlng.lng };
+          locationInput.value = r.text || r.properties.LongLabel || "";
+          userMarker.setLatLng([userLocation.lat, userLocation.lng]);
+          locationStatus.textContent = "Location set from map search";
+          locationStatus.className = "location-status";
+        }
+      });
     }
 
     function clearStoreMarkers() {
       storeMarkers.forEach(m => map.removeLayer(m));
       storeMarkers = [];
+    }
+
+    function clearDriveTimePolygon() {
+      if (driveTimePolygon) {
+        map.removeLayer(driveTimePolygon);
+        driveTimePolygon = null;
+      }
     }
 
     function addStoreMarker(store, rank, total) {
@@ -545,33 +654,69 @@
     }
 
     // =========================================================
-    // Geocoding helpers (simple approach using known locations)
+    // Esri Geocoding — resolve address text to lat/lng
     // =========================================================
-    // Since we're using mock data, we use a simple table for demo locations.
-    // In production, you'd call a geocoding API here.
-    const knownLocations = {
-      "hoboken, nj": { lat: 40.744, lng: -74.032 },
-      "hoboken": { lat: 40.744, lng: -74.032 },
-      "jersey city, nj": { lat: 40.7178, lng: -74.0431 },
-      "jersey city": { lat: 40.7178, lng: -74.0431 },
-      "weehawken, nj": { lat: 40.7696, lng: -74.0246 },
-      "weehawken": { lat: 40.7696, lng: -74.0246 },
-      "union city, nj": { lat: 40.7679, lng: -74.0324 },
-      "union city": { lat: 40.7679, lng: -74.0324 },
-      "07030": { lat: 40.744, lng: -74.032 },
-      "07302": { lat: 40.7178, lng: -74.0431 },
-      "07086": { lat: 40.7696, lng: -74.0246 },
-    };
+    async function geocodeWithEsri(text) {
+      const apikey = getApiKey();
+      const params = new URLSearchParams({
+        f: "json",
+        singleLine: text,
+        maxLocations: 1,
+        outFields: "Match_addr"
+      });
+      if (apikey) params.set("token", apikey);
 
-    function geocodeLocation(text) {
-      const key = text.trim().toLowerCase();
-      if (knownLocations[key]) return knownLocations[key];
-      // Fallback: default to Hoboken
-      return { lat: 40.744, lng: -74.032 };
+      const url = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?${params}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.candidates && data.candidates.length > 0) {
+        const c = data.candidates[0];
+        return { lat: c.location.y, lng: c.location.x, label: c.attributes.Match_addr };
+      }
+      return null;
     }
 
     // =========================================================
-    // Distance / Drive-time estimation
+    // Esri Service Area — drive-time polygon
+    // =========================================================
+    async function fetchDriveTimePolygon(lat, lng, minutes) {
+      const apikey = getApiKey();
+      if (!apikey) return null;
+
+      const params = new URLSearchParams({
+        f: "json",
+        token: apikey,
+        facilities: `${lng},${lat}`,
+        defaultBreaks: String(minutes),
+        travelDirection: "esriNATravelDirectionFromFacility",
+        outputPolygons: "esriServiceAreaPolygonSimplified",
+        travelMode: '{"type":"automobile"}',
+        trimOuterPolygon: "true"
+      });
+
+      const url = `https://route.arcgis.com/arcgis/rest/services/World/ServiceAreas/NAServer/ServiceArea_World/solveServiceArea?${params}`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.saPolygons && data.saPolygons.features && data.saPolygons.features.length > 0) {
+          const rings = data.saPolygons.features[0].geometry.rings;
+          // Convert Esri ring format [lng, lat] to Leaflet [lat, lng]
+          const latlngs = rings.map(ring =>
+            ring.map(coord => [coord[1], coord[0]])
+          );
+          return latlngs;
+        }
+      } catch (e) {
+        console.warn("Service area request failed:", e);
+      }
+      return null;
+    }
+
+    // =========================================================
+    // Fallback: Haversine distance / drive-time estimation
     // =========================================================
     function haversineKm(lat1, lng1, lat2, lng2) {
       const R = 6371;
@@ -583,10 +728,9 @@
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // Rough drive-time estimate: avg 25 km/h in urban area
     function estimateDriveMinutes(lat1, lng1, lat2, lng2) {
       const km = haversineKm(lat1, lng1, lat2, lng2);
-      return (km / 25) * 60;
+      return (km / 25) * 60; // ~25 km/h urban average
     }
 
     function formatDistance(lat1, lng1, lat2, lng2) {
@@ -594,6 +738,22 @@
       const miles = km * 0.621371;
       const mins = Math.round(estimateDriveMinutes(lat1, lng1, lat2, lng2));
       return `${miles.toFixed(1)} mi · ~${mins} min`;
+    }
+
+    // Point-in-polygon test (ray casting) for drive-time polygon filtering
+    function pointInPolygon(lat, lng, polygonRings) {
+      for (const ring of polygonRings) {
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const yi = ring[i][0], xi = ring[i][1];
+          const yj = ring[j][0], xj = ring[j][1];
+          if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+          }
+        }
+        if (inside) return true;
+      }
+      return false;
     }
 
     // =========================================================
@@ -652,7 +812,6 @@
       if (!e.target.closest(".suggestions")) hideSuggestions();
     });
 
-    // Quick-add buttons
     function renderQuickAdd() {
       const popular = ["milk", "eggs", "bread", "bananas", "chicken breast", "rice", "coffee"];
       quickAddEl.innerHTML = popular.map(item =>
@@ -667,6 +826,24 @@
     const driveTimeValue = document.getElementById("driveTimeValue");
     driveTimeSlider.addEventListener("input", () => {
       driveTimeValue.textContent = driveTimeSlider.value + " min";
+    });
+
+    // =========================================================
+    // API key status
+    // =========================================================
+    const apiKeyInput = document.getElementById("apiKeyInput");
+    const apiKeyStatusEl = document.getElementById("apiKeyStatus");
+    const driveTimeLegend = document.getElementById("driveTimeLegend");
+
+    apiKeyInput.addEventListener("input", () => {
+      const key = getApiKey();
+      if (key.length > 10) {
+        apiKeyStatusEl.textContent = "Key set — geocoding and drive-time areas enabled";
+        apiKeyStatusEl.className = "api-key-status valid";
+      } else {
+        apiKeyStatusEl.textContent = "No key — using basic mode (haversine estimates)";
+        apiKeyStatusEl.className = "api-key-status missing";
+      }
     });
 
     // =========================================================
@@ -685,9 +862,29 @@
       locationStatus.textContent = "Getting location...";
       locationStatus.className = "location-status";
       navigator.geolocation.getCurrentPosition(
-        pos => {
+        async pos => {
           userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           locationInput.value = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+
+          // Reverse-geocode with Esri to get a readable address
+          const apikey = getApiKey();
+          if (apikey) {
+            try {
+              const params = new URLSearchParams({
+                f: "json",
+                token: apikey,
+                location: `${pos.coords.longitude},${pos.coords.latitude}`
+              });
+              const res = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?${params}`);
+              const data = await res.json();
+              if (data.address) {
+                locationInput.value = data.address.Match_addr || data.address.LongLabel || locationInput.value;
+              }
+            } catch (e) {
+              // Keep coordinate display as fallback
+            }
+          }
+
           locationStatus.textContent = "Location set";
           locationStatus.className = "location-status";
           map.setView([userLocation.lat, userLocation.lng], 13);
@@ -708,29 +905,81 @@
 
     compareBtn.addEventListener("click", runComparison);
 
-    function runComparison() {
+    async function runComparison() {
       if (shoppingList.length === 0) {
         resultsEl.innerHTML = '<div class="card" style="padding:20px;color:var(--red);">Please add at least one item to your list.</div>';
         return;
       }
 
-      // Update user location from input
-      const loc = geocodeLocation(locationInput.value);
+      compareBtn.disabled = true;
+      compareBtn.textContent = "Searching...";
+
+      // Geocode the location using Esri (or fall back to coordinates)
+      let loc = null;
+      const inputVal = locationInput.value.trim();
+
+      // Check if input looks like raw coordinates
+      const coordMatch = inputVal.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+      if (coordMatch) {
+        loc = { lat: parseFloat(coordMatch[1]), lng: parseFloat(coordMatch[2]) };
+      } else {
+        // Use Esri geocoding
+        const esriResult = await geocodeWithEsri(inputVal);
+        if (esriResult) {
+          loc = esriResult;
+          locationStatus.textContent = `Resolved: ${esriResult.label}`;
+          locationStatus.className = "location-status";
+        }
+      }
+
+      if (!loc) {
+        // Fallback to default
+        loc = { lat: 40.744, lng: -74.032 };
+        locationStatus.textContent = "Could not geocode — using default (Hoboken)";
+        locationStatus.className = "location-status error";
+      }
+
       userLocation = loc;
       map.setView([loc.lat, loc.lng], 13);
       userMarker.setLatLng([loc.lat, loc.lng]);
 
       const maxMinutes = parseInt(driveTimeSlider.value);
 
-      // Filter stores by drive time
+      // Try to fetch Esri drive-time polygon
+      clearDriveTimePolygon();
+      let driveTimeRings = null;
+      const apikey = getApiKey();
+
+      if (apikey) {
+        driveTimeRings = await fetchDriveTimePolygon(loc.lat, loc.lng, maxMinutes);
+        if (driveTimeRings) {
+          driveTimePolygon = L.polygon(driveTimeRings, {
+            color: "rgba(37, 99, 235, 0.5)",
+            fillColor: "rgba(37, 99, 235, 0.08)",
+            weight: 2,
+            dashArray: "6 4"
+          }).addTo(map);
+          driveTimeLegend.style.display = "flex";
+        }
+      }
+
+      if (!driveTimeRings) {
+        driveTimeLegend.style.display = "none";
+      }
+
+      // Filter stores: use polygon if available, otherwise haversine estimate
       const reachableStores = storeData.stores.filter(store => {
-        const mins = estimateDriveMinutes(loc.lat, loc.lng, store.lat, store.lng);
-        return mins <= maxMinutes;
+        if (driveTimeRings) {
+          return pointInPolygon(store.lat, store.lng, driveTimeRings);
+        }
+        return estimateDriveMinutes(loc.lat, loc.lng, store.lat, store.lng) <= maxMinutes;
       });
 
       if (reachableStores.length === 0) {
         clearStoreMarkers();
         resultsEl.innerHTML = '<div class="card" style="padding:20px;color:var(--orange);">No stores found within your drive time. Try increasing the range.</div>';
+        compareBtn.disabled = false;
+        compareBtn.textContent = "Compare Prices";
         return;
       }
 
@@ -751,40 +1000,33 @@
         return { store, prices, total, itemCount };
       });
 
-      // Sort by total price (ascending)
       storeResults.sort((a, b) => a.total - b.total);
 
-      // Find cheapest price per item (for highlighting)
+      // Find cheapest / most expensive per item
       const cheapestPerItem = {};
+      const mostExpensivePerItem = {};
       shoppingList.forEach(item => {
-        let min = Infinity;
+        let min = Infinity, max = -Infinity;
         storeResults.forEach(sr => {
-          if (sr.prices[item] !== null && sr.prices[item] < min) {
-            min = sr.prices[item];
+          if (sr.prices[item] !== null) {
+            if (sr.prices[item] < min) min = sr.prices[item];
+            if (sr.prices[item] > max) max = sr.prices[item];
           }
         });
         cheapestPerItem[item] = min === Infinity ? null : min;
-      });
-
-      // Find most expensive price per item
-      const mostExpensivePerItem = {};
-      shoppingList.forEach(item => {
-        let max = -Infinity;
-        storeResults.forEach(sr => {
-          if (sr.prices[item] !== null && sr.prices[item] > max) {
-            max = sr.prices[item];
-          }
-        });
         mostExpensivePerItem[item] = max === -Infinity ? null : max;
       });
 
-      // Update map
+      // Update map markers
       clearStoreMarkers();
       const bounds = L.latLngBounds([[loc.lat, loc.lng]]);
       storeResults.forEach((sr, i) => {
         addStoreMarker(sr.store, i, sr.total);
         bounds.extend([sr.store.lat, sr.store.lng]);
       });
+      if (driveTimePolygon) {
+        bounds.extend(driveTimePolygon.getBounds());
+      }
       map.fitBounds(bounds, { padding: [40, 40] });
 
       // Calculate savings
@@ -795,7 +1037,6 @@
       // Build results HTML
       let html = "";
 
-      // Savings banner
       if (storeResults.length > 1) {
         html += `
           <div class="savings-banner">
@@ -811,10 +1052,7 @@
         `;
       }
 
-      // Price comparison table
       html += `<div class="card"><div class="results-table-wrap"><table class="results-table">`;
-
-      // Header row
       html += `<tr><th>Item</th>`;
       storeResults.forEach((sr, i) => {
         const dist = formatDistance(loc.lat, loc.lng, sr.store.lat, sr.store.lng);
@@ -822,7 +1060,6 @@
       });
       html += `</tr>`;
 
-      // Item rows
       shoppingList.forEach(item => {
         html += `<tr><td>${item}</td>`;
         storeResults.forEach(sr => {
@@ -839,16 +1076,16 @@
         html += `</tr>`;
       });
 
-      // Total row
       html += `<tr class="total-row"><td>Total</td>`;
       storeResults.forEach(sr => {
         html += `<td>$${sr.total.toFixed(2)}</td>`;
       });
       html += `</tr>`;
-
       html += `</table></div></div>`;
 
       resultsEl.innerHTML = html;
+      compareBtn.disabled = false;
+      compareBtn.textContent = "Compare Prices";
     }
 
     // =========================================================
