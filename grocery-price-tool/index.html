@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grocery Price Compare</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f5f0;
+      --surface: #ffffff;
+      --border: #ddd;
+      --text: #1a1a1a;
+      --text-muted: #666;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --green: #16a34a;
+      --red: #dc2626;
+      --orange: #ea580c;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .app {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+      min-height: calc(100vh - 80px);
+    }
+
+    @media (max-width: 800px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* --- Sidebar: Controls --- */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .card h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* Shopping list */
+    .item-input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .item-input-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+    }
+
+    .item-input-row input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: var(--accent-hover); }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: var(--text);
+    }
+
+    .btn-secondary:hover { background: #d1d5db; }
+
+    .btn-compare {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .suggestions {
+      position: relative;
+    }
+
+    .suggestions-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 60px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-height: 180px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .suggestions-list.visible { display: block; }
+
+    .suggestions-list div {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .suggestions-list div:hover {
+      background: #f0f4ff;
+    }
+
+    .shopping-list {
+      list-style: none;
+      margin-top: 12px;
+    }
+
+    .shopping-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.9rem;
+    }
+
+    .shopping-list li:last-child { border-bottom: none; }
+
+    .shopping-list li button {
+      background: none;
+      border: none;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 2px 6px;
+    }
+
+    .quick-add {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .quick-add button {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--bg);
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all 0.15s;
+    }
+
+    .quick-add button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Location */
+    .location-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .location-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+    }
+
+    .location-row input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+
+    .geo-btn {
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .geo-btn:hover { background: #f0f4ff; }
+
+    .geo-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Drive time slider */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--accent);
+    }
+
+    .slider-value {
+      font-weight: 600;
+      font-size: 0.9rem;
+      min-width: 55px;
+      text-align: right;
+    }
+
+    /* --- Main: Results --- */
+    .main {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #map {
+      height: 320px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      z-index: 1;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      opacity: 0.4;
+    }
+
+    .empty-state p {
+      font-size: 0.95rem;
+    }
+
+    /* Results table */
+    .results-table-wrap {
+      overflow-x: auto;
+    }
+
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .results-table th,
+    .results-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .results-table th {
+      background: #fafafa;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--text-muted);
+      position: sticky;
+      top: 0;
+    }
+
+    .results-table th.store-col {
+      min-width: 120px;
+    }
+
+    .results-table .cheapest {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    .results-table .expensive {
+      color: var(--red);
+      font-weight: 500;
+    }
+
+    .results-table .total-row td {
+      font-weight: 700;
+      border-top: 2px solid var(--text);
+      font-size: 0.95rem;
+    }
+
+    .store-header {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .store-header .store-name {
+      font-weight: 600;
+    }
+
+    .store-header .store-dist {
+      font-weight: 400;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .savings-banner {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .savings-banner .label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .savings-banner .value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--green);
+    }
+
+    .savings-banner .detail {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    .no-price {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    .location-status {
+      font-size: 0.8rem;
+      color: var(--green);
+      margin-top: 4px;
+    }
+
+    .location-status.error {
+      color: var(--red);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grocery Price Compare</h1>
+    <p>Find the cheapest groceries near you</p>
+  </header>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <!-- Shopping List -->
+      <div class="card">
+        <h2>Shopping List</h2>
+        <div class="suggestions">
+          <div class="item-input-row">
+            <input type="text" id="itemInput" placeholder="Add an item..." autocomplete="off" />
+            <button class="btn btn-primary" id="addItemBtn">Add</button>
+          </div>
+          <div class="suggestions-list" id="suggestionsList"></div>
+        </div>
+        <ul class="shopping-list" id="shoppingList"></ul>
+        <div class="quick-add" id="quickAdd"></div>
+      </div>
+
+      <!-- Location -->
+      <div class="card">
+        <h2>Your Location</h2>
+        <div class="location-row">
+          <input type="text" id="locationInput" placeholder="Address or zip code" value="Hoboken, NJ" />
+          <button class="geo-btn" id="geoBtn" title="Use my location">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v4m0 12v4m10-10h-4M6 12H2"/>
+            </svg>
+          </button>
+        </div>
+        <div id="locationStatus"></div>
+      </div>
+
+      <!-- Drive Time -->
+      <div class="card">
+        <h2>Max Drive Time</h2>
+        <div class="slider-row">
+          <input type="range" id="driveTime" min="5" max="30" step="5" value="15" />
+          <span class="slider-value" id="driveTimeValue">15 min</span>
+        </div>
+      </div>
+
+      <!-- Compare Button -->
+      <button class="btn btn-primary btn-compare" id="compareBtn">Compare Prices</button>
+    </div>
+
+    <!-- Main content -->
+    <div class="main">
+      <div id="map"></div>
+      <div id="results">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/>
+          </svg>
+          <p>Add items to your list and click <strong>Compare Prices</strong><br>to find the best deals nearby.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // =========================================================
+    // State
+    // =========================================================
+    let shoppingList = [];
+    let storeData = null;
+    let userLocation = { lat: 40.744, lng: -74.032, label: "Hoboken, NJ" }; // default
+    let map, userMarker, storeMarkers = [];
+
+    // =========================================================
+    // Load mock data
+    // =========================================================
+    async function loadData() {
+      const res = await fetch("data/mock-prices.json");
+      storeData = await res.json();
+      renderQuickAdd();
+    }
+
+    // =========================================================
+    // Map
+    // =========================================================
+    function initMap() {
+      map = L.map("map").setView([userLocation.lat, userLocation.lng], 13);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
+      }).addTo(map);
+
+      userMarker = L.marker([userLocation.lat, userLocation.lng], {
+        icon: L.divIcon({
+          className: "",
+          html: '<div style="width:14px;height:14px;background:#2563eb;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>',
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
+        })
+      }).addTo(map).bindPopup("You");
+    }
+
+    function clearStoreMarkers() {
+      storeMarkers.forEach(m => map.removeLayer(m));
+      storeMarkers = [];
+    }
+
+    function addStoreMarker(store, rank, total) {
+      const colors = ["#16a34a", "#ea580c", "#dc2626", "#6b7280", "#6b7280", "#6b7280"];
+      const color = colors[Math.min(rank, colors.length - 1)];
+      const marker = L.marker([store.lat, store.lng], {
+        icon: L.divIcon({
+          className: "",
+          html: `<div style="
+            background:${color};color:#fff;font-weight:700;font-size:12px;
+            width:28px;height:28px;border-radius:50%;
+            display:flex;align-items:center;justify-content:center;
+            border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);
+          ">${rank + 1}</div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        })
+      }).addTo(map);
+      marker.bindPopup(`<strong>${store.name}</strong><br>${store.address}<br>Total: $${total.toFixed(2)}`);
+      storeMarkers.push(marker);
+    }
+
+    // =========================================================
+    // Geocoding helpers (simple approach using known locations)
+    // =========================================================
+    // Since we're using mock data, we use a simple table for demo locations.
+    // In production, you'd call a geocoding API here.
+    const knownLocations = {
+      "hoboken, nj": { lat: 40.744, lng: -74.032 },
+      "hoboken": { lat: 40.744, lng: -74.032 },
+      "jersey city, nj": { lat: 40.7178, lng: -74.0431 },
+      "jersey city": { lat: 40.7178, lng: -74.0431 },
+      "weehawken, nj": { lat: 40.7696, lng: -74.0246 },
+      "weehawken": { lat: 40.7696, lng: -74.0246 },
+      "union city, nj": { lat: 40.7679, lng: -74.0324 },
+      "union city": { lat: 40.7679, lng: -74.0324 },
+      "07030": { lat: 40.744, lng: -74.032 },
+      "07302": { lat: 40.7178, lng: -74.0431 },
+      "07086": { lat: 40.7696, lng: -74.0246 },
+    };
+
+    function geocodeLocation(text) {
+      const key = text.trim().toLowerCase();
+      if (knownLocations[key]) return knownLocations[key];
+      // Fallback: default to Hoboken
+      return { lat: 40.744, lng: -74.032 };
+    }
+
+    // =========================================================
+    // Distance / Drive-time estimation
+    // =========================================================
+    function haversineKm(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Rough drive-time estimate: avg 25 km/h in urban area
+    function estimateDriveMinutes(lat1, lng1, lat2, lng2) {
+      const km = haversineKm(lat1, lng1, lat2, lng2);
+      return (km / 25) * 60;
+    }
+
+    function formatDistance(lat1, lng1, lat2, lng2) {
+      const km = haversineKm(lat1, lng1, lat2, lng2);
+      const miles = km * 0.621371;
+      const mins = Math.round(estimateDriveMinutes(lat1, lng1, lat2, lng2));
+      return `${miles.toFixed(1)} mi · ~${mins} min`;
+    }
+
+    // =========================================================
+    // Shopping list UI
+    // =========================================================
+    const itemInput = document.getElementById("itemInput");
+    const addItemBtn = document.getElementById("addItemBtn");
+    const shoppingListEl = document.getElementById("shoppingList");
+    const suggestionsList = document.getElementById("suggestionsList");
+    const quickAddEl = document.getElementById("quickAdd");
+
+    function renderShoppingList() {
+      shoppingListEl.innerHTML = shoppingList.map((item, i) =>
+        `<li><span>${item}</span><button onclick="removeItem(${i})">remove</button></li>`
+      ).join("");
+    }
+
+    function addItem(name) {
+      const clean = name.trim().toLowerCase();
+      if (!clean || shoppingList.includes(clean)) return;
+      shoppingList.push(clean);
+      renderShoppingList();
+      itemInput.value = "";
+      hideSuggestions();
+    }
+
+    function removeItem(index) {
+      shoppingList.splice(index, 1);
+      renderShoppingList();
+    }
+
+    addItemBtn.addEventListener("click", () => addItem(itemInput.value));
+    itemInput.addEventListener("keydown", e => {
+      if (e.key === "Enter") addItem(itemInput.value);
+    });
+
+    // Autocomplete suggestions
+    itemInput.addEventListener("input", () => {
+      const val = itemInput.value.trim().toLowerCase();
+      if (!val || !storeData) { hideSuggestions(); return; }
+      const matches = storeData.availableItems.filter(
+        item => item.includes(val) && !shoppingList.includes(item)
+      );
+      if (matches.length === 0) { hideSuggestions(); return; }
+      suggestionsList.innerHTML = matches.map(m =>
+        `<div onclick="addItem('${m}')">${m}</div>`
+      ).join("");
+      suggestionsList.classList.add("visible");
+    });
+
+    function hideSuggestions() {
+      suggestionsList.classList.remove("visible");
+    }
+
+    document.addEventListener("click", e => {
+      if (!e.target.closest(".suggestions")) hideSuggestions();
+    });
+
+    // Quick-add buttons
+    function renderQuickAdd() {
+      const popular = ["milk", "eggs", "bread", "bananas", "chicken breast", "rice", "coffee"];
+      quickAddEl.innerHTML = popular.map(item =>
+        `<button onclick="addItem('${item}')">${item}</button>`
+      ).join("");
+    }
+
+    // =========================================================
+    // Drive-time slider
+    // =========================================================
+    const driveTimeSlider = document.getElementById("driveTime");
+    const driveTimeValue = document.getElementById("driveTimeValue");
+    driveTimeSlider.addEventListener("input", () => {
+      driveTimeValue.textContent = driveTimeSlider.value + " min";
+    });
+
+    // =========================================================
+    // Geolocation
+    // =========================================================
+    const geoBtn = document.getElementById("geoBtn");
+    const locationInput = document.getElementById("locationInput");
+    const locationStatus = document.getElementById("locationStatus");
+
+    geoBtn.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        locationStatus.textContent = "Geolocation not supported";
+        locationStatus.className = "location-status error";
+        return;
+      }
+      locationStatus.textContent = "Getting location...";
+      locationStatus.className = "location-status";
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          locationInput.value = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+          locationStatus.textContent = "Location set";
+          locationStatus.className = "location-status";
+          map.setView([userLocation.lat, userLocation.lng], 13);
+          userMarker.setLatLng([userLocation.lat, userLocation.lng]);
+        },
+        err => {
+          locationStatus.textContent = "Could not get location";
+          locationStatus.className = "location-status error";
+        }
+      );
+    });
+
+    // =========================================================
+    // Compare logic
+    // =========================================================
+    const compareBtn = document.getElementById("compareBtn");
+    const resultsEl = document.getElementById("results");
+
+    compareBtn.addEventListener("click", runComparison);
+
+    function runComparison() {
+      if (shoppingList.length === 0) {
+        resultsEl.innerHTML = '<div class="card" style="padding:20px;color:var(--red);">Please add at least one item to your list.</div>';
+        return;
+      }
+
+      // Update user location from input
+      const loc = geocodeLocation(locationInput.value);
+      userLocation = loc;
+      map.setView([loc.lat, loc.lng], 13);
+      userMarker.setLatLng([loc.lat, loc.lng]);
+
+      const maxMinutes = parseInt(driveTimeSlider.value);
+
+      // Filter stores by drive time
+      const reachableStores = storeData.stores.filter(store => {
+        const mins = estimateDriveMinutes(loc.lat, loc.lng, store.lat, store.lng);
+        return mins <= maxMinutes;
+      });
+
+      if (reachableStores.length === 0) {
+        clearStoreMarkers();
+        resultsEl.innerHTML = '<div class="card" style="padding:20px;color:var(--orange);">No stores found within your drive time. Try increasing the range.</div>';
+        return;
+      }
+
+      // Calculate totals
+      const storeResults = reachableStores.map(store => {
+        let total = 0;
+        let itemCount = 0;
+        const prices = {};
+        shoppingList.forEach(item => {
+          if (store.prices[item] !== undefined) {
+            prices[item] = store.prices[item];
+            total += store.prices[item];
+            itemCount++;
+          } else {
+            prices[item] = null;
+          }
+        });
+        return { store, prices, total, itemCount };
+      });
+
+      // Sort by total price (ascending)
+      storeResults.sort((a, b) => a.total - b.total);
+
+      // Find cheapest price per item (for highlighting)
+      const cheapestPerItem = {};
+      shoppingList.forEach(item => {
+        let min = Infinity;
+        storeResults.forEach(sr => {
+          if (sr.prices[item] !== null && sr.prices[item] < min) {
+            min = sr.prices[item];
+          }
+        });
+        cheapestPerItem[item] = min === Infinity ? null : min;
+      });
+
+      // Find most expensive price per item
+      const mostExpensivePerItem = {};
+      shoppingList.forEach(item => {
+        let max = -Infinity;
+        storeResults.forEach(sr => {
+          if (sr.prices[item] !== null && sr.prices[item] > max) {
+            max = sr.prices[item];
+          }
+        });
+        mostExpensivePerItem[item] = max === -Infinity ? null : max;
+      });
+
+      // Update map
+      clearStoreMarkers();
+      const bounds = L.latLngBounds([[loc.lat, loc.lng]]);
+      storeResults.forEach((sr, i) => {
+        addStoreMarker(sr.store, i, sr.total);
+        bounds.extend([sr.store.lat, sr.store.lng]);
+      });
+      map.fitBounds(bounds, { padding: [40, 40] });
+
+      // Calculate savings
+      const cheapest = storeResults[0];
+      const mostExpensive = storeResults[storeResults.length - 1];
+      const savings = mostExpensive.total - cheapest.total;
+
+      // Build results HTML
+      let html = "";
+
+      // Savings banner
+      if (storeResults.length > 1) {
+        html += `
+          <div class="savings-banner">
+            <div>
+              <div class="label">Best option</div>
+              <div class="value">${cheapest.store.name} — $${cheapest.total.toFixed(2)}</div>
+            </div>
+            <div>
+              <div class="detail">Save $${savings.toFixed(2)} vs ${mostExpensive.store.name}</div>
+              <div class="detail">${formatDistance(loc.lat, loc.lng, cheapest.store.lat, cheapest.store.lng)} drive</div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Price comparison table
+      html += `<div class="card"><div class="results-table-wrap"><table class="results-table">`;
+
+      // Header row
+      html += `<tr><th>Item</th>`;
+      storeResults.forEach((sr, i) => {
+        const dist = formatDistance(loc.lat, loc.lng, sr.store.lat, sr.store.lng);
+        html += `<th class="store-col"><div class="store-header"><span class="store-name">${i + 1}. ${sr.store.name}</span><span class="store-dist">${dist}</span></div></th>`;
+      });
+      html += `</tr>`;
+
+      // Item rows
+      shoppingList.forEach(item => {
+        html += `<tr><td>${item}</td>`;
+        storeResults.forEach(sr => {
+          const price = sr.prices[item];
+          if (price === null) {
+            html += `<td class="no-price">N/A</td>`;
+          } else {
+            const isCheapest = price === cheapestPerItem[item] && storeResults.length > 1;
+            const isExpensive = price === mostExpensivePerItem[item] && storeResults.length > 1 && price !== cheapestPerItem[item];
+            const cls = isCheapest ? "cheapest" : isExpensive ? "expensive" : "";
+            html += `<td class="${cls}">$${price.toFixed(2)}</td>`;
+          }
+        });
+        html += `</tr>`;
+      });
+
+      // Total row
+      html += `<tr class="total-row"><td>Total</td>`;
+      storeResults.forEach(sr => {
+        html += `<td>$${sr.total.toFixed(2)}</td>`;
+      });
+      html += `</tr>`;
+
+      html += `</table></div></div>`;
+
+      resultsEl.innerHTML = html;
+    }
+
+    // =========================================================
+    // Init
+    // =========================================================
+    loadData().then(() => {
+      initMap();
+    });
+  </script>
+</body>
+</html>
