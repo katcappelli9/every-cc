@@ -6,6 +6,9 @@
   <title>Grocery Price Compare</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/esri-leaflet-geocoder@3.1.4/dist/esri-leaflet-geocoder.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -85,25 +88,78 @@
       margin-bottom: 12px;
     }
 
-    /* Shopping list */
-    .item-input-row {
+    /* Shopping list — lined paper */
+    .shopping-list-card {
+      min-height: calc((100vh - 80px) / 3);
+      padding: 0;
+      overflow: hidden;
+      position: relative;
       display: flex;
-      gap: 8px;
+      flex-direction: column;
     }
 
-    .item-input-row input {
+    .shopping-list-card h2 {
+      padding: 16px 20px 0;
+    }
+
+    .lined-paper {
+      --line-height: 32px;
+      --margin-left: 40px;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          transparent,
+          transparent calc(var(--line-height) - 1px),
+          #bdd6f5 calc(var(--line-height) - 1px),
+          #bdd6f5 var(--line-height)
+        ),
+        linear-gradient(to right, #e8bfbf 0px, #e8bfbf 2px, transparent 2px);
+      background-position: 0 0, var(--margin-left) 0;
+      background-size: 100% var(--line-height), 100% 100%;
+      background-color: #fdf8ec;
+      padding: 0 12px 0 calc(var(--margin-left) + 12px);
       flex: 1;
-      padding: 8px 12px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 0.9rem;
+      overflow-y: auto;
     }
 
-    .item-input-row input:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    .lined-paper-line {
+      display: flex;
+      align-items: center;
+      height: var(--line-height);
+      position: relative;
     }
+
+    .lined-paper-line::before {
+      content: "\2022";
+      position: absolute;
+      left: -16px;
+      color: #555;
+      font-size: 1rem;
+      line-height: var(--line-height);
+    }
+
+    .lined-paper-line.empty::before {
+      content: "";
+    }
+
+    .lined-paper-line input {
+      width: 100%;
+      border: none;
+      background: transparent;
+      font-family: 'Patrick Hand', 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
+      font-size: 0.95rem;
+      color: #222;
+      line-height: var(--line-height);
+      height: var(--line-height);
+      padding: 0;
+      outline: none;
+    }
+
+    .lined-paper-line input::placeholder {
+      color: #bbb;
+      font-style: italic;
+    }
+
 
     .btn {
       padding: 8px 16px;
@@ -136,15 +192,11 @@
       font-weight: 600;
     }
 
-    .suggestions {
-      position: relative;
-    }
-
     .suggestions-list {
       position: absolute;
-      top: 100%;
+      bottom: 0;
       left: 0;
-      right: 60px;
+      right: 0;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -169,27 +221,7 @@
 
     .shopping-list {
       list-style: none;
-      margin-top: 12px;
-    }
-
-    .shopping-list li {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid #f0f0f0;
-      font-size: 0.9rem;
-    }
-
-    .shopping-list li:last-child { border-bottom: none; }
-
-    .shopping-list li button {
-      background: none;
-      border: none;
-      color: var(--red);
-      cursor: pointer;
-      font-size: 0.8rem;
-      padding: 2px 6px;
+      display: none;
     }
 
     .quick-add {
@@ -493,17 +525,11 @@
       </div>
 
       <!-- Shopping List -->
-      <div class="card">
+      <div class="card shopping-list-card">
         <h2>Shopping List</h2>
-        <div class="suggestions">
-          <div class="item-input-row">
-            <input type="text" id="itemInput" placeholder="Add an item..." autocomplete="off" />
-            <button class="btn btn-primary" id="addItemBtn">Add</button>
-          </div>
-          <div class="suggestions-list" id="suggestionsList"></div>
-        </div>
+        <div class="lined-paper" id="linedPaper"></div>
+        <div class="suggestions-list" id="suggestionsList"></div>
         <ul class="shopping-list" id="shoppingList"></ul>
-        <div class="quick-add" id="quickAdd"></div>
       </div>
 
       <!-- Location -->
@@ -757,66 +783,151 @@
     }
 
     // =========================================================
-    // Shopping list UI
+    // Shopping list UI — lined paper
     // =========================================================
-    const itemInput = document.getElementById("itemInput");
-    const addItemBtn = document.getElementById("addItemBtn");
-    const shoppingListEl = document.getElementById("shoppingList");
+    const linedPaper = document.getElementById("linedPaper");
     const suggestionsList = document.getElementById("suggestionsList");
-    const quickAddEl = document.getElementById("quickAdd");
+    const VISIBLE_LINES = 12;
+    let activeLineIndex = null;
 
-    function renderShoppingList() {
-      shoppingListEl.innerHTML = shoppingList.map((item, i) =>
-        `<li><span>${item}</span><button onclick="removeItem(${i})">remove</button></li>`
-      ).join("");
+    function syncShoppingList() {
+      shoppingList = [];
+      linedPaper.querySelectorAll(".lined-paper-line input").forEach(input => {
+        const val = input.value.trim().toLowerCase();
+        if (val) shoppingList.push(val);
+      });
     }
 
-    function addItem(name) {
-      const clean = name.trim().toLowerCase();
-      if (!clean || shoppingList.includes(clean)) return;
-      shoppingList.push(clean);
-      renderShoppingList();
-      itemInput.value = "";
-      hideSuggestions();
+    function renderLinedPaper() {
+      const totalLines = Math.max(VISIBLE_LINES, shoppingList.length + 3);
+      linedPaper.innerHTML = "";
+      for (let i = 0; i < totalLines; i++) {
+        const line = document.createElement("div");
+        line.className = "lined-paper-line" + (i >= shoppingList.length ? " empty" : "");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = shoppingList[i] || "";
+        input.placeholder = i === 0 && shoppingList.length === 0 ? "Type an item..." : "";
+        input.autocomplete = "off";
+        input.dataset.line = i;
+        input.addEventListener("input", handleLineInput);
+        input.addEventListener("keydown", handleLineKeydown);
+        input.addEventListener("focus", handleLineFocus);
+        input.addEventListener("blur", handleLineBlur);
+        line.appendChild(input);
+        linedPaper.appendChild(line);
+      }
     }
 
-    function removeItem(index) {
-      shoppingList.splice(index, 1);
-      renderShoppingList();
+    function handleLineInput(e) {
+      const input = e.target;
+      const line = input.closest(".lined-paper-line");
+      const val = input.value.trim();
+      if (val) {
+        line.classList.remove("empty");
+      } else {
+        line.classList.add("empty");
+      }
+      showSuggestionsForLine(input);
+      syncShoppingList();
     }
 
-    addItemBtn.addEventListener("click", () => addItem(itemInput.value));
-    itemInput.addEventListener("keydown", e => {
-      if (e.key === "Enter") addItem(itemInput.value);
-    });
+    function handleLineKeydown(e) {
+      const idx = parseInt(e.target.dataset.line);
+      if (e.key === "Enter") {
+        e.preventDefault();
+        // Move to next line, adding one if needed
+        const nextIdx = idx + 1;
+        const lines = linedPaper.querySelectorAll(".lined-paper-line input");
+        if (nextIdx < lines.length) {
+          lines[nextIdx].focus();
+        }
+        hideSuggestions();
+      } else if (e.key === "Backspace" && e.target.value === "" && idx > 0) {
+        e.preventDefault();
+        // Remove this empty line and move up
+        const lines = Array.from(linedPaper.querySelectorAll(".lined-paper-line"));
+        if (lines.length > VISIBLE_LINES) {
+          lines[idx].remove();
+          // Re-index
+          linedPaper.querySelectorAll(".lined-paper-line input").forEach((inp, i) => {
+            inp.dataset.line = i;
+          });
+        }
+        const prevLines = linedPaper.querySelectorAll(".lined-paper-line input");
+        if (prevLines[idx - 1]) prevLines[idx - 1].focus();
+        syncShoppingList();
+      } else if (e.key === "ArrowDown") {
+        const lines = linedPaper.querySelectorAll(".lined-paper-line input");
+        if (idx + 1 < lines.length) { e.preventDefault(); lines[idx + 1].focus(); }
+      } else if (e.key === "ArrowUp") {
+        const lines = linedPaper.querySelectorAll(".lined-paper-line input");
+        if (idx - 1 >= 0) { e.preventDefault(); lines[idx - 1].focus(); }
+      }
+    }
 
-    // Autocomplete suggestions
-    itemInput.addEventListener("input", () => {
-      const val = itemInput.value.trim().toLowerCase();
+    function handleLineFocus(e) {
+      activeLineIndex = parseInt(e.target.dataset.line);
+      showSuggestionsForLine(e.target);
+    }
+
+    function handleLineBlur() {
+      setTimeout(() => {
+        activeLineIndex = null;
+        hideSuggestions();
+      }, 150);
+    }
+
+    function showSuggestionsForLine(input) {
+      const val = input.value.trim().toLowerCase();
       if (!val || !storeData) { hideSuggestions(); return; }
       const matches = storeData.availableItems.filter(
         item => item.includes(val) && !shoppingList.includes(item)
       );
       if (matches.length === 0) { hideSuggestions(); return; }
       suggestionsList.innerHTML = matches.map(m =>
-        `<div onclick="addItem('${m}')">${m}</div>`
+        `<div onclick="fillLine('${m}')">${m}</div>`
       ).join("");
       suggestionsList.classList.add("visible");
-    });
+    }
+
+    function fillLine(value) {
+      if (activeLineIndex === null) return;
+      const inputs = linedPaper.querySelectorAll(".lined-paper-line input");
+      if (inputs[activeLineIndex]) {
+        inputs[activeLineIndex].value = value;
+        inputs[activeLineIndex].closest(".lined-paper-line").classList.remove("empty");
+        syncShoppingList();
+        // Move to next line
+        const next = activeLineIndex + 1;
+        if (inputs[next]) inputs[next].focus();
+      }
+      hideSuggestions();
+    }
+
+    function addItem(name) {
+      const clean = name.trim().toLowerCase();
+      if (!clean || shoppingList.includes(clean)) return;
+      shoppingList.push(clean);
+      renderLinedPaper();
+    }
+
+    function removeItem(index) {
+      shoppingList.splice(index, 1);
+      renderLinedPaper();
+    }
 
     function hideSuggestions() {
       suggestionsList.classList.remove("visible");
     }
 
     document.addEventListener("click", e => {
-      if (!e.target.closest(".suggestions")) hideSuggestions();
+      if (!e.target.closest(".shopping-list-card")) hideSuggestions();
     });
 
     function renderQuickAdd() {
-      const popular = ["milk", "eggs", "bread", "bananas", "chicken breast", "rice", "coffee"];
-      quickAddEl.innerHTML = popular.map(item =>
-        `<button onclick="addItem('${item}')">${item}</button>`
-      ).join("");
+      // No longer needed — users type directly on the paper
+      renderLinedPaper();
     }
 
     // =========================================================
